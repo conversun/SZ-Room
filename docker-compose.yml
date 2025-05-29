@@ -1,6 +1,24 @@
 version: '3.8'
 
 services:
+  redis:
+    image: public.ecr.aws/docker/library/redis:7
+    container_name: sz-room-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - crawler-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   sz-room-crawler:
     build:
       context: .
@@ -11,6 +29,8 @@ services:
     environment:
       - NODE_ENV=production
       - TZ=Asia/Shanghai
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       
     env_file:
       - .env
@@ -21,6 +41,9 @@ services:
       
     networks:
       - crawler-network
+      
+    depends_on:
+      - redis
       
     logging:
       driver: "json-file"
@@ -46,3 +69,7 @@ networks:
 # 如果需要持久化数据，可以添加数据卷
 # volumes:
 #   crawler-data: 
+
+volumes:
+  redis-data:
+    driver: local

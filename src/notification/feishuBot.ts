@@ -1,10 +1,11 @@
 import axios from 'axios';
 import crypto from 'crypto';
-import { Notice, PushResult, FeishuError } from '../types';
+import { Notice, PushResult, FeishuError, CategorizedNotices } from '../types';
 import { config } from '../config/config';
 import { FeishuConfig } from '../config/feishu';
 import { MessageTemplate } from './messageTemplate';
 import { logger } from '../utils/logger';
+import { CategoryService } from '../services/categoryService';
 
 /**
  * 飞书机器人推送器
@@ -297,5 +298,201 @@ export class FeishuBot {
    */
   private static sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * 推送分类通知公告（单条消息包含所有分类）
+   */
+  static async pushCategorizedNotices(notices: Notice[]): Promise<PushResult> {
+    try {
+      logger.info(`开始推送 ${notices.length} 条分类公告到飞书`);
+
+      if (notices.length === 0) {
+        return {
+          success: true,
+          message: '无新公告需要推送',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // 对公告进行分类
+      const categorized = CategoryService.categorizeNotices(notices);
+      
+      if (FeishuConfig.shouldUseBotApi()) {
+        return await this.pushCategorizedViaBotApi(categorized);
+      } else if (FeishuConfig.shouldUseWebhook()) {
+        return await this.pushCategorizedViaWebhook(categorized);
+      } else {
+        throw new FeishuError('飞书配置错误：未配置有效的推送方式', 'CONFIG_ERROR');
+      }
+    } catch (error: any) {
+      logger.error('推送分类公告失败:', error);
+      return {
+        success: false,
+        message: error.message || '未知错误',
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * 按分类分别推送公告（每个分类一条消息）
+   */
+  static async pushNoticesByCategory(notices: Notice[]): Promise<PushResult[]> {
+    try {
+      logger.info(`开始按分类推送 ${notices.length} 条公告到飞书`);
+
+      if (notices.length === 0) {
+        return [{
+          success: true,
+          message: '无新公告需要推送',
+          timestamp: new Date().toISOString(),
+        }];
+      }
+
+      // 对公告进行分类
+      const categorized = CategoryService.categorizeNotices(notices);
+      const results: PushResult[] = [];
+
+      // 按分类依次推送
+      for (const [category, categoryNotices] of Object.entries(categorized)) {
+        if (categoryNotices.length === 0) continue;
+
+        logger.info(`推送分类 "${category}" 的 ${categoryNotices.length} 条公告`);
+        
+        try {
+          const message = MessageTemplate.createSingleCategoryMessage(category, categoryNotices);
+          if (!message) continue;
+
+          let result: PushResult;
+          if (FeishuConfig.shouldUseBotApi()) {
+            result = await this.pushSingleMessageViaBotApi(message);
+          } else if (FeishuConfig.shouldUseWebhook()) {
+            result = await this.pushSingleMessageViaWebhook(message);
+          } else {
+            throw new FeishuError('飞书配置错误：未配置有效的推送方式', 'CONFIG_ERROR');
+          }
+
+          results.push({
+            ...result,
+            message: `${category}: ${result.message}`
+          });
+
+          // 推送间隔，避免频率限制
+          if (Object.keys(categorized).length > 1) {
+            await this.sleep(1000);
+          }
+
+        } catch (error: any) {
+          logger.error(`推送分类 "${category}" 失败:`, error);
+          results.push({
+            success: false,
+            message: `${category}: ${error.message}`,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }
+
+      return results;
+    } catch (error: any) {
+      logger.error('按分类推送失败:', error);
+      return [{
+        success: false,
+        message: error.message || '未知错误',
+        timestamp: new Date().toISOString(),
+      }];
+    }
+  }
+
+  /**
+   * 通过 Bot API 推送分类公告
+   */
+  private static async pushCategorizedViaBotApi(categorized: CategorizedNotices): Promise<PushResult> {
+    const client = FeishuConfig.getClient();
+    if (!client) {
+      throw new FeishuError('飞书客户端未初始化', 'CLIENT_ERROR');
+    }
+
+    try {
+      // 创建分类消息内容
+      const message = MessageTemplate.createCategorizedInteractiveCard(categorized);
+      
+      // 发送消息
+      const response = await client.im.message.create({
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: config.feishu.chatId!,
+          msg_type: message.msg_type,
+          content: JSON.stringify(message.msg_type === 'interactive' ? message.card : message.content),
+        },
+      });
+
+      if (response.code === 0) {
+        logger.info(`Bot API 分类推送成功，消息ID: ${response.data?.message_id}`);
+        return {
+          success: true,
+          message: '分类推送成功',
+          timestamp: new Date().toISOString(),
+        };
+      } else {
+        throw new FeishuError(`Bot API 分类推送失败: ${response.msg}`, 'API_ERROR', response);
+      }
+    } catch (error: any) {
+      logger.error('Bot API 分类推送失败:', error);
+      throw new FeishuError(`Bot API 分类推送失败: ${error.message}`, 'PUSH_ERROR', error);
+    }
+  }
+
+  /**
+   * 通过 Webhook 推送分类公告
+   */
+  private static async pushCategorizedViaWebhook(categorized: CategorizedNotices): Promise<PushResult> {
+    if (!config.feishu.webhookUrl) {
+      throw new FeishuError('Webhook URL 未配置', 'CONFIG_ERROR');
+    }
+
+    let lastError: any;
+    
+    for (let attempt = 1; attempt <= this.MAX_RETRIES; attempt++) {
+      try {
+        // 创建分类消息内容
+        const message = MessageTemplate.createCategorizedInteractiveCard(categorized);
+        
+        // 添加签名（如果有密钥）
+        if (config.feishu.webhookSecret) {
+          this.addWebhookSignature(message, config.feishu.webhookSecret);
+        }
+
+        // 发送请求
+        const response = await axios.post(config.feishu.webhookUrl, message, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          timeout: 10000,
+        });
+
+        if (response.status === 200 && response.data?.code === 0) {
+          logger.info(`Webhook 分类推送成功 (尝试 ${attempt}/${this.MAX_RETRIES})`);
+          return {
+            success: true,
+            message: '分类推送成功',
+            timestamp: new Date().toISOString(),
+          };
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.data?.msg || response.statusText}`);
+        }
+      } catch (error: any) {
+        lastError = error;
+        logger.warn(`Webhook 分类推送失败 (尝试 ${attempt}/${this.MAX_RETRIES}): ${error.message}`);
+        
+        if (attempt < this.MAX_RETRIES) {
+          await this.sleep(this.RETRY_DELAY * attempt);
+        }
+      }
+    }
+
+    throw new FeishuError(`Webhook 分类推送失败，已重试 ${this.MAX_RETRIES} 次: ${lastError.message}`, 'WEBHOOK_ERROR', lastError);
   }
 } 

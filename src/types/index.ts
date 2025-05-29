@@ -6,6 +6,7 @@ export interface Notice {
   publishDate: string;  // 发布时间（ISO字符串）
   summary?: string;     // 内容摘要
   content?: string;     // 完整内容
+  category?: string;    // 公告分类
 }
 
 // 过滤结果
@@ -58,4 +59,27 @@ export interface RetryConfig {
   retries: number;
   delay: number;
   backoff?: number;
+}
+
+// 分类规则配置
+export interface CategoryRule {
+  name: string;         // 分类名称
+  keywords: string[];   // 关键词列表
+  priority: number;     // 优先级（数字越小优先级越高）
+}
+
+// 分类结果
+export interface CategorizedNotices {
+  [category: string]: Notice[];
+}
+
+// Redis配置
+export interface RedisConfig {
+  enabled: boolean;     // 是否启用Redis
+  host: string;
+  port: number;
+  password?: string;
+  db: number;
+  keyPrefix: string;    // Redis key 前缀
+  ttl: number;          // 缓存过期时间（秒）
 } 

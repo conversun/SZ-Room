@@ -4,9 +4,11 @@
   "description": "深圳住建局通知公告抓取与飞书推送系统",
   "main": "dist/app.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-json",
+    "copy-json": "cp src/config/*.json dist/config/ 2>/dev/null || true",
     "start": "node dist/app.js",
     "dev": "ts-node src/app.ts",
+    "check-status": "node check-status.js",
     "start:pm2": "pm2 start ecosystem.config.js",
     "stop:pm2": "pm2 stop sz-room-crawler",
     "restart:pm2": "pm2 restart sz-room-crawler",
@@ -25,6 +27,7 @@
     "axios": "^1.9.0",
     "cheerio": "^1.0.0",
     "dotenv": "^16.3.1",
+    "ioredis": "^5.6.1",
     "node-cron": "^3.0.3",
     "winston": "^3.11.0",
     "winston-daily-rotate-file": "^4.7.1"

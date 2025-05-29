@@ -4,6 +4,10 @@ import { logger } from './utils/logger';
 import { CrawlerService } from './services/crawlerService';
 import { CronJobManager } from './scheduler/cronJob';
 import { cache } from './utils/cache';
+import { CategoryService } from './services/categoryService';
+
+// 动态导入Redis服务
+let redisService: any = null;
 
 /**
  * 应用程序主类
@@ -13,7 +17,8 @@ class Application {
   private isShuttingDown = false;
 
   constructor() {
-    this.crawlerService = new CrawlerService();
+    // 默认使用分类推送模式
+    this.crawlerService = new CrawlerService('categorized');
   }
 
   /**
@@ -53,6 +58,15 @@ class Application {
       // 验证飞书配置
       FeishuConfig.validateConfig();
       
+      // 验证分类规则
+      const categoryValidation = CategoryService.validateCategoryRules(config.filter.categoryRules);
+      if (!categoryValidation.isValid) {
+        logger.warn('分类规则验证失败:', categoryValidation.errors);
+        logger.info('将使用默认分类规则');
+      } else {
+        logger.info('✅ 分类规则验证通过');
+      }
+      
       logger.info('✅ 配置验证通过');
       logger.info('系统配置信息:', {
         nodeEnv: config.app.nodeEnv,
@@ -62,6 +76,12 @@ class Application {
         scheduleEnabled: config.schedule.enabled,
         cronExpression: config.schedule.cronExpression,
         feishuConfig: FeishuConfig.getConfigInfo(),
+        redisConfig: {
+          host: config.redis.host,
+          port: config.redis.port,
+          db: config.redis.db,
+        },
+        categoryRules: config.filter.categoryRules.length,
       });
       
     } catch (error: any) {
@@ -77,6 +97,9 @@ class Application {
     logger.info('初始化系统组件...');
     
     try {
+      // 初始化Redis连接（可选）
+      await this.initializeRedis();
+      
       // 测试飞书连接
       logger.info('测试飞书推送连接...');
       const testResult = await this.crawlerService.test();
@@ -93,6 +116,28 @@ class Application {
     } catch (error: any) {
       logger.error('系统初始化失败:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 初始化Redis连接
+   */
+  private async initializeRedis(): Promise<void> {
+    try {
+      logger.info('尝试连接Redis...');
+      const { redisService: redis } = await import('./services/redisService');
+      redisService = redis;
+      
+      // 等待连接建立
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      
+      if (await redisService.ping()) {
+        logger.info('✅ Redis连接成功');
+      } else {
+        logger.warn('Redis连接失败，将使用内存缓存');
+      }
+    } catch (error: any) {
+      logger.warn('Redis服务不可用，将使用内存缓存:', error.message);
     }
   }
 
@@ -217,6 +262,11 @@ class Application {
     try {
       // 停止定时任务
       await CronJobManager.shutdown();
+      
+      // 关闭Redis连接
+      if (redisService) {
+        await redisService.disconnect();
+      }
       
       // 清理缓存
       cache.destroy();

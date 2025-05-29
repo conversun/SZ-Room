@@ -1,309 +1,282 @@
-# 深圳住建局通知公告抓取与飞书推送系统
+# 深圳住建局通知公告抓取系统
 
-## 项目简介
+智能抓取深圳住建局通知公告，支持分类推送和Redis去重的飞书机器人推送系统。
 
-本项目是一个自动化的网页抓取系统，专门用于监控深圳市住房和建设局的通知公告页面，并将新发布的公告通过飞书机器人推送给用户。系统采用 Node.js + TypeScript 开发，支持定时任务和智能去重。
+## ✨ 新功能
 
-## 功能特点
+### 🔄 Redis 去重支持
+- 使用Redis缓存已发送的公告ID，避免重复推送
+- 支持Redis不可用时自动降级到内存缓存
+- 可配置TTL过期时间，自动清理历史记录
 
-- 🕷️ **智能网页抓取**: 支持多页面数据抓取，具备重试机制和反爬虫处理
-- 🔍 **灵活数据过滤**: 支持时间范围、关键词包含/排除等多种过滤条件
-- 🚀 **内存去重机制**: 避免重复推送，支持程序重启后的持久化去重
-- 📨 **飞书推送集成**: 支持 Webhook 和 Bot API 两种推送方式，消息格式丰富
-- ⏰ **定时任务调度**: 基于 cron 表达式的灵活定时执行
-- 📊 **完善日志系统**: 分级日志记录，支持日志轮转和文件存储
-- 🐳 **容器化部署**: 提供 Docker 和 docker-compose 配置
-- 🔧 **生产就绪**: 支持 PM2 进程管理，具备健康检查和优雅关闭
+### 📂 智能分类推送
+- 根据关键词自动对公告进行分类
+- 支持三种推送模式：
+  - `single`: 传统单条消息（不分类）
+  - `categorized`: 分类后的单条消息
+  - `by-category`: 每个分类单独发送一条消息
+- 可自定义分类规则和优先级
 
-## 技术栈
+## 🚀 功能特性
 
-- **核心框架**: Node.js + TypeScript
-- **HTTP 请求**: axios
-- **HTML 解析**: cheerio
-- **定时任务**: node-cron
-- **日志系统**: winston + winston-daily-rotate-file
-- **飞书集成**: @larksuiteoapi/node-sdk
-- **环境配置**: dotenv
-- **进程管理**: PM2
-- **容器化**: Docker + Docker Compose
+- **智能爬虫**: 定时抓取深圳住建局通知公告
+- **过滤筛选**: 支持关键词过滤和时间范围筛选
+- **去重机制**: Redis + 内存双重去重，确保不重复推送
+- **分类推送**: 智能分类，按类别组织公告信息
+- **飞书推送**: 支持飞书机器人API和Webhook两种推送方式
+- **容错设计**: 网络异常自动重试，Redis故障自动降级
+- **定时任务**: 支持Cron表达式配置定时执行
+- **Docker部署**: 一键部署，包含Redis服务
 
-## 快速开始
+## 🛠️ 技术栈
 
-### 1. 环境要求
+- **Runtime**: Node.js + TypeScript
+- **爬虫**: Axios + Cheerio
+- **缓存**: Redis + 内存缓存
+- **推送**: 飞书机器人API
+- **调度**: node-cron
+- **日志**: Winston
+- **部署**: Docker + Docker Compose
 
-- Node.js >= 16.0.0
-- npm >= 8.0.0
-- (可选) Docker & Docker Compose
-- (可选) PM2
+## 📦 快速开始
 
-### 2. 安装依赖
+### 使用 Docker Compose（推荐）
 
+1. **克隆项目**
 ```bash
-# 克隆项目
 git clone <repository-url>
 cd sz-room-crawler
+```
 
-# 安装依赖
+2. **配置环境变量**
+```bash
+cp env.example .env
+# 编辑 .env 文件，配置飞书机器人参数
+```
+
+3. **启动服务**
+```bash
+# 启动 Redis 和爬虫服务
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f sz-room-crawler
+```
+
+### 手动部署
+
+1. **安装依赖**
+```bash
 npm install
 ```
 
-### 3. 环境配置
+2. **配置 Redis（可选）**
+```bash
+# 安装并启动 Redis
+redis-server
 
-复制环境变量模板并配置：
+# 或使用 Docker 启动 Redis
+docker run -d --name redis -p 6379:6379 redis:7.2-alpine
+```
 
+3. **配置环境变量**
 ```bash
 cp env.example .env
 ```
 
-编辑 `.env` 文件，配置必要参数：
-
+4. **构建并运行**
 ```bash
+npm run build
+npm start
+```
+
+## ⚙️ 配置说明
+
+### 基础配置
+```env
 # 应用配置
-NODE_ENV=development
+NODE_ENV=production
 LOG_LEVEL=info
+RUN_ONCE=false  # true: 单次运行, false: 定时任务
 
 # 爬虫配置
 CRAWLER_BASE_URL=https://zjj.sz.gov.cn/ztfw/zfbz/tzgg2017/index.html
-FILTER_DAY_RANGE=7
+CRAWLER_TIMEOUT=10000
+CRAWLER_RETRY_TIMES=3
+
+# 过滤配置
+FILTER_DAY_RANGE=7  # 抓取最近N天的公告
 FILTER_KEYWORDS=住房,建设,规划,土地,房屋
+FILTER_EXCLUDE_KEYWORDS=招聘,人事,领军
+```
 
-# 飞书配置 (二选一)
-# 方式一：Webhook
-FEISHU_WEBHOOK_URL=your_webhook_url_here
-FEISHU_WEBHOOK_SECRET=your_webhook_secret_here
+### Redis 配置（可选）
+```env
+# Redis配置 - 用于消息去重
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+REDIS_KEY_PREFIX=sz-room:
+REDIS_TTL=604800  # 7天过期
+```
 
-# 方式二：Bot API
-FEISHU_APP_ID=your_app_id_here
-FEISHU_APP_SECRET=your_app_secret_here
-FEISHU_CHAT_ID=your_chat_id_here
+### 分类规则配置
 
-# 定时任务配置
+分类规则通过 `src/config/categoryRules.json` 文件配置：
+
+```json
+[
+  {
+    "name": "分类1",
+    "keywords": ["Keyword1"],
+    "priority": 1
+  },
+  {
+    "name": "房地产相关",
+    "keywords": ["房地产", "住房", "楼盘", "商品房"],
+    "priority": 2
+  },
+  {
+    "name": "其他",
+    "keywords": [],
+    "priority": 999
+  }
+]
+```
+
+**字段说明:**
+- `name`: 分类名称
+- `keywords`: 匹配关键词列表，为空时作为默认分类
+- `priority`: 优先级，数字越小优先级越高
+
+**注意:** 如果在环境变量中设置了 `FILTER_CATEGORY_RULES`，将优先使用环境变量配置。
+
+### 飞书配置
+
+#### 方式一：Webhook（推荐）
+```env
+FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-key
+FEISHU_WEBHOOK_SECRET=your-secret  # 可选
+```
+
+#### 方式二：Bot API
+```env
+FEISHU_APP_ID=your-app-id
+FEISHU_APP_SECRET=your-app-secret
+FEISHU_CHAT_ID=your-chat-id
+```
+
+### 定时任务配置
+```env
 SCHEDULE_ENABLED=true
 SCHEDULE_CRON=0 */1 * * *  # 每小时执行一次
 ```
 
-### 4. 构建与运行
+## 🎯 推送模式
 
-```bash
-# 构建项目
-npm run build
+系统支持三种推送模式，可在代码中配置：
 
-# 开发模式运行
-npm run dev
+### 1. 单条消息模式 (`single`)
+- 所有新公告合并为一条消息发送
+- 保持原有功能不变
 
-# 生产模式运行
-npm start
+### 2. 分类单条模式 (`categorized`) - 默认
+- 按分类组织公告，发送一条包含所有分类的消息
+- 结构清晰，信息完整
 
-# 单次执行（不启动定时任务）
-RUN_ONCE=true npm start
+### 3. 分类分发模式 (`by-category`)
+- 每个分类单独发送一条消息
+- 适合不同分类需要发送到不同群组的场景
+
+## 📊 分类规则
+
+### 默认分类
+- **房地产开发**: 房地产开发、商品房、预售许可等
+- **保障房政策**: 保障房、公租房、安居房等
+- **建设工程**: 建设工程、工程建设、施工许可等
+- **规划审批**: 规划许可、用地规划、建设用地等
+- **房屋租赁**: 房屋租赁、租赁备案、租金等
+- **物业管理**: 物业管理、物业服务、业主等
+- **行政执法**: 行政处罚、违法建设、执法检查等
+- **政策法规**: 政策、法规、办法、规定等
+- **其他**: 未匹配到上述分类的公告
+
+### 自定义分类
+可通过编辑 `src/config/categoryRules.json` 文件配置自定义分类规则：
+
+```json
+[
+  {
+    "name": "分类名称",
+    "keywords": ["关键词1", "关键词2"],
+    "priority": 1
+  }
+]
 ```
 
-## 飞书配置
+- `name`: 分类名称
+- `keywords`: 匹配关键词列表，为空时作为默认分类
+- `priority`: 优先级，数字越小优先级越高
 
-### 方式一：Webhook 机器人
+**配置优先级:**
+1. 环境变量 `FILTER_CATEGORY_RULES`（如果设置）
+2. 文件 `src/config/categoryRules.json`
+3. 内置默认规则
 
-1. 在飞书群组中添加自定义机器人
-2. 获取 Webhook URL
-3. (可选) 设置安全验证密钥
-4. 在 `.env` 中配置 `FEISHU_WEBHOOK_URL` 和 `FEISHU_WEBHOOK_SECRET`
+## 🔧 运维管理
 
-### 方式二：Bot API
-
-1. 创建飞书应用
-2. 获取 App ID 和 App Secret
-3. 将机器人添加到目标群组
-4. 获取 Chat ID
-5. 在 `.env` 中配置对应参数
-
-## 部署指南
-
-### PM2 部署
-
+### 查看日志
 ```bash
-# 安装 PM2
-npm install -g pm2
+# Docker 方式
+docker-compose logs -f sz-room-crawler
 
-# 启动应用
-npm run start:pm2
-
-# 查看状态
+# PM2 方式
 npm run logs:pm2
-
-# 停止应用
-npm run stop:pm2
 ```
 
-### Docker 部署
-
+### 重启服务
 ```bash
-# 构建镜像
-docker build -t sz-room-crawler .
+# Docker 方式
+docker-compose restart sz-room-crawler
 
-# 运行容器
-docker run -d \
-  --name sz-room-crawler \
-  --env-file .env \
-  -v $(pwd)/logs:/app/logs \
-  sz-room-crawler
+# PM2 方式
+npm run restart:pm2
 ```
 
-### Docker Compose 部署
-
+### Redis 管理
 ```bash
-# 启动服务
-docker-compose up -d
+# 连接 Redis
+redis-cli
 
-# 查看日志
-docker-compose logs -f
+# 查看缓存的key
+KEYS sz-room:*
 
-# 停止服务
-docker-compose down
+# 清空缓存
+FLUSHDB
 ```
 
-## 配置详解
+## 🚨 故障排除
 
-### 爬虫配置
+### Redis 连接问题
+- 检查Redis服务是否启动
+- 确认网络连接和端口配置
+- 系统会自动降级到内存缓存
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `CRAWLER_BASE_URL` | 目标网站URL | 深圳住建局通知公告页面 |
-| `CRAWLER_USER_AGENT` | 浏览器标识 | Chrome 120 |
-| `CRAWLER_TIMEOUT` | 请求超时时间(ms) | 10000 |
-| `CRAWLER_RETRY_TIMES` | 重试次数 | 3 |
+### 飞书推送失败
+- 检查Webhook URL或Bot配置
+- 确认网络连接
+- 查看日志中的详细错误信息
 
-### 过滤配置
+### 爬虫抓取失败
+- 检查目标网站是否可访问
+- 确认网站结构是否发生变化
+- 调整超时时间和重试次数
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `FILTER_DAY_RANGE` | 获取最近N天的数据 | 7 |
-| `FILTER_KEYWORDS` | 包含关键词(逗号分隔) | - |
-| `FILTER_EXCLUDE_KEYWORDS` | 排除关键词(逗号分隔) | - |
-| `FILTER_CACHE_SIZE` | 内存缓存大小 | 1000 |
+## 📄 许可证
 
-### 定时任务配置
+MIT License
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `SCHEDULE_ENABLED` | 启用定时任务 | true |
-| `SCHEDULE_CRON` | Cron 表达式 | `0 */1 * * *` (每小时) |
+## 🤝 贡献
 
-### 常用 Cron 表达式
-
-- `0 */1 * * *` - 每小时执行
-- `0 */30 * * * *` - 每30分钟执行  
-- `0 0 9,12,18 * * *` - 每天9点、12点、18点执行
-- `0 0 9 * * 1-5` - 工作日上午9点执行
-
-## 使用示例
-
-### 单次运行测试
-
-```bash
-# 测试系统功能
-RUN_ONCE=true npm start
-
-# 查看日志
-tail -f logs/combined-*.log
-```
-
-### 自定义过滤条件
-
-```bash
-# 只获取包含"住房"或"建设"的最近3天公告
-FILTER_DAY_RANGE=3 FILTER_KEYWORDS=住房,建设 npm start
-```
-
-### 开发模式调试
-
-```bash
-# 启用调试日志
-LOG_LEVEL=debug npm run dev
-```
-
-## 监控与维护
-
-### 日志查看
-
-```bash
-# 查看所有日志
-tail -f logs/combined-*.log
-
-# 查看错误日志
-tail -f logs/error-*.log
-
-# PM2 日志
-pm2 logs sz-room-crawler
-```
-
-### 健康检查
-
-系统提供多种健康检查方式：
-
-- 通过飞书推送测试连接状态
-- Docker 容器健康检查
-- PM2 进程监控
-
-### 故障排除
-
-1. **网络连接问题**
-   - 检查目标网站可访问性
-   - 验证防火墙设置
-   - 确认代理配置
-
-2. **飞书推送失败**
-   - 验证 Webhook URL 有效性
-   - 检查 App ID/Secret 配置
-   - 确认机器人权限
-
-3. **解析数据为空**
-   - 确认网站结构未发生变化
-   - 检查选择器配置
-   - 验证过滤条件设置
-
-## 项目结构
-
-```
-src/
-├── config/           # 配置文件
-│   ├── config.ts     # 主配置
-│   └── feishu.ts     # 飞书配置
-├── crawler/          # 爬虫模块
-│   ├── scraper.ts    # 网页抓取
-│   └── parser.ts     # 数据解析
-├── filter/           # 过滤模块
-│   ├── dataFilter.ts    # 数据过滤
-│   └── deduplication.ts # 去重处理
-├── notification/     # 推送模块
-│   ├── feishuBot.ts     # 飞书机器人
-│   └── messageTemplate.ts # 消息模板
-├── scheduler/        # 定时任务
-│   └── cronJob.ts    # 任务调度
-├── services/         # 业务服务
-│   └── crawlerService.ts # 爬虫服务
-├── utils/           # 工具类
-│   ├── cache.ts     # 缓存管理
-│   └── logger.ts    # 日志工具
-├── types/           # 类型定义
-│   └── index.ts
-└── app.ts           # 应用入口
-```
-
-## 贡献指南
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开 Pull Request
-
-## 许可证
-
-本项目基于 MIT 许可证开源 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 更新日志
-
-### v1.0.0 (2024-01-01)
-- 初始版本发布
-- 支持深圳住建局通知公告抓取
-- 集成飞书推送功能
-- 提供 Docker 部署支持 
+欢迎提交 Issue 和 Pull Request！ 

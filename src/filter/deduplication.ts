@@ -2,14 +2,38 @@ import { Notice, FilterResult } from '../types';
 import { cache } from '../utils/cache';
 import { logger } from '../utils/logger';
 
+// 动态导入Redis服务，避免在Redis不可用时影响内存缓存
+let redisService: any = null;
+let isRedisAvailable = false;
+
+// 尝试导入Redis服务
+(async () => {
+  try {
+    const { redisService: redis } = await import('../services/redisService');
+    redisService = redis;
+    
+    // 检查Redis连接状态
+    setTimeout(async () => {
+      if (redisService && await redisService.ping()) {
+        isRedisAvailable = true;
+        logger.info('Redis服务可用，将使用Redis进行去重');
+      } else {
+        logger.warn('Redis服务不可用，将使用内存缓存');
+      }
+    }, 2000);
+  } catch (error) {
+    logger.warn('无法加载Redis服务，将使用内存缓存:', error);
+  }
+})();
+
 /**
  * 去重处理器
  */
 export class DeduplicationFilter {
   /**
-   * 处理去重
+   * 处理去重（支持Redis和内存缓存双重模式）
    */
-  static process(filterResult: FilterResult): FilterResult {
+  static async process(filterResult: FilterResult): Promise<FilterResult> {
     const { notices, totalCount, filteredCount } = filterResult;
     
     logger.info(`开始去重处理，输入 ${notices.length} 条公告`);
@@ -19,11 +43,21 @@ export class DeduplicationFilter {
     logger.info(`内部去重后剩余: ${internallyDeduped.length} 条`);
 
     // 2. 缓存去重（与历史记录比较）
-    const newNotices = this.filterNewNotices(internallyDeduped);
+    let newNotices: Notice[];
+    if (isRedisAvailable && redisService) {
+      newNotices = await this.filterNewNoticesWithRedis(internallyDeduped);
+    } else {
+      newNotices = this.filterNewNotices(internallyDeduped);
+    }
+    
     logger.info(`缓存去重后新增: ${newNotices.length} 条`);
 
     // 3. 更新缓存
-    this.updateCache(newNotices);
+    if (isRedisAvailable && redisService) {
+      await this.updateRedisCache(newNotices);
+    } else {
+      this.updateCache(newNotices);
+    }
 
     return {
       notices: newNotices,
@@ -31,6 +65,159 @@ export class DeduplicationFilter {
       filteredCount,
       newCount: newNotices.length,
     };
+  }
+
+  /**
+   * 使用Redis过滤新公告
+   */
+  private static async filterNewNoticesWithRedis(notices: Notice[]): Promise<Notice[]> {
+    if (!redisService || notices.length === 0) {
+      return notices;
+    }
+
+    try {
+      const noticeIds = notices.map(notice => notice.id);
+      const sentStatus = await redisService.checkBatchSentStatus(noticeIds);
+      
+      const newNotices = notices.filter(notice => !sentStatus[notice.id]);
+      
+      logger.info(`Redis去重: 输入 ${notices.length} 条，过滤掉 ${notices.length - newNotices.length} 条已发送的公告`);
+      
+      return newNotices;
+    } catch (error: any) {
+      logger.error('Redis去重失败，降级到内存缓存:', error);
+      return this.filterNewNotices(notices);
+    }
+  }
+
+  /**
+   * 更新Redis缓存
+   */
+  private static async updateRedisCache(notices: Notice[]): Promise<void> {
+    if (!redisService || notices.length === 0) {
+      return;
+    }
+
+    try {
+      const ids = notices.map(notice => notice.id);
+      await redisService.markBatchAsSent(ids);
+      
+      logger.info(`Redis缓存更新完成，新增 ${ids.length} 条记录`);
+    } catch (error: any) {
+      logger.error('Redis缓存更新失败:', error);
+      // 降级到内存缓存
+      this.updateCache(notices);
+    }
+  }
+
+  /**
+   * 检查单个公告是否为新公告（Redis优先）
+   */
+  static async isNewNotice(notice: Notice): Promise<boolean> {
+    if (isRedisAvailable && redisService) {
+      try {
+        const hasSent = await redisService.hasSent(notice.id);
+        return !hasSent;
+      } catch (error: any) {
+        logger.error('Redis检查失败，降级到内存缓存:', error);
+      }
+    }
+    
+    // 降级到内存缓存
+    return !cache.has(notice.id);
+  }
+
+  /**
+   * 标记公告为已发送（Redis优先）
+   */
+  static async markAsSent(noticeId: string): Promise<void> {
+    if (isRedisAvailable && redisService) {
+      try {
+        await redisService.markAsSent(noticeId);
+        return;
+      } catch (error: any) {
+        logger.error('Redis标记失败，降级到内存缓存:', error);
+      }
+    }
+    
+    // 降级到内存缓存
+    cache.add(noticeId);
+  }
+
+  /**
+   * 批量标记公告为已发送（Redis优先）
+   */
+  static async markBatchAsSent(noticeIds: string[]): Promise<void> {
+    if (isRedisAvailable && redisService) {
+      try {
+        await redisService.markBatchAsSent(noticeIds);
+        return;
+      } catch (error: any) {
+        logger.error('Redis批量标记失败，降级到内存缓存:', error);
+      }
+    }
+    
+    // 降级到内存缓存
+    cache.addBatch(noticeIds);
+  }
+
+  /**
+   * 获取去重统计信息（包含Redis和内存缓存信息）
+   */
+  static async getStats(): Promise<{
+    cacheType: 'redis' | 'memory';
+    cacheSize: number;
+    maxCacheSize?: number;
+    oldestCacheTimestamp?: number | null;
+    isRedisConnected?: boolean;
+  }> {
+    if (isRedisAvailable && redisService) {
+      try {
+        const redisStats = await redisService.getStats();
+        return {
+          cacheType: 'redis',
+          cacheSize: redisStats.totalSentMessages,
+          isRedisConnected: redisStats.isConnected,
+        };
+      } catch (error: any) {
+        logger.error('获取Redis统计失败:', error);
+      }
+    }
+    
+    // 降级到内存缓存统计
+    const cacheStats = cache.getStats();
+    return {
+      cacheType: 'memory',
+      cacheSize: cacheStats.size,
+      maxCacheSize: cacheStats.maxSize,
+      oldestCacheTimestamp: cacheStats.oldestTimestamp,
+    };
+  }
+
+  /**
+   * 清空缓存（Redis优先）
+   */
+  static async clearCache(): Promise<void> {
+    if (isRedisAvailable && redisService) {
+      try {
+        await redisService.clearCache();
+        logger.info('Redis缓存已清空');
+        return;
+      } catch (error: any) {
+        logger.error('清空Redis缓存失败:', error);
+      }
+    }
+    
+    // 清空内存缓存
+    cache.clear();
+    logger.info('内存缓存已清空');
+  }
+
+  /**
+   * 检查Redis可用性
+   */
+  static isRedisAvailable(): boolean {
+    return isRedisAvailable;
   }
 
   /**
@@ -131,46 +318,6 @@ export class DeduplicationFilter {
       // 如果URL解析失败，返回原始URL的小写版本
       return url.toLowerCase();
     }
-  }
-
-  /**
-   * 获取去重统计信息
-   */
-  static getStats(): {
-    cacheSize: number;
-    maxCacheSize: number;
-    oldestCacheTimestamp: number | null;
-  } {
-    const cacheStats = cache.getStats();
-    return {
-      cacheSize: cacheStats.size,
-      maxCacheSize: cacheStats.maxSize,
-      oldestCacheTimestamp: cacheStats.oldestTimestamp,
-    };
-  }
-
-  /**
-   * 清空去重缓存
-   */
-  static clearCache(): void {
-    cache.clear();
-    logger.info('去重缓存已清空');
-  }
-
-  /**
-   * 手动添加到缓存（用于初始化或测试）
-   */
-  static addToCache(notices: Notice[]): void {
-    const ids = notices.map(notice => notice.id);
-    cache.addBatch(ids);
-    logger.info(`手动添加 ${ids.length} 条记录到缓存`);
-  }
-
-  /**
-   * 检查是否为新公告
-   */
-  static isNewNotice(notice: Notice): boolean {
-    return !cache.has(notice.id);
   }
 
   /**

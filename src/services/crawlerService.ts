@@ -4,6 +4,7 @@ import { HtmlParser } from '../crawler/parser';
 import { DataFilter } from '../filter/dataFilter';
 import { DeduplicationFilter } from '../filter/deduplication';
 import { FeishuBot } from '../notification/feishuBot';
+import { CategoryService } from './categoryService';
 import { logger } from '../utils/logger';
 import { config } from '../config/config';
 
@@ -14,10 +15,20 @@ export class CrawlerService {
   private scraper: WebScraper;
   private lastRunTime: string | null = null;
   private totalProcessed = 0;
+  private pushMode: 'single' | 'categorized' | 'by-category' = 'categorized'; // 推送模式
 
-  constructor() {
+  constructor(pushMode: 'single' | 'categorized' | 'by-category' = 'categorized') {
     this.scraper = new WebScraper();
-    logger.info('爬虫服务初始化完成');
+    this.pushMode = pushMode;
+    logger.info(`爬虫服务初始化完成，推送模式: ${pushMode}`);
+  }
+
+  /**
+   * 设置推送模式
+   */
+  setPushMode(mode: 'single' | 'categorized' | 'by-category'): void {
+    this.pushMode = mode;
+    logger.info(`推送模式已设置为: ${mode}`);
   }
 
   /**
@@ -28,7 +39,7 @@ export class CrawlerService {
     totalProcessed: number;
     newNotices: number;
     filteredOut: number;
-    pushResult?: PushResult;
+    pushResult?: PushResult | PushResult[];
     error?: string;
   }> {
     const startTime = Date.now();
@@ -44,13 +55,16 @@ export class CrawlerService {
       // 3. 数据过滤
       const filterResult = this.filterNotices(allNotices);
       
-      // 4. 去重处理
-      const dedupeResult = this.deduplicateNotices(filterResult);
+      // 4. 去重处理（异步）
+      const dedupeResult = await this.deduplicateNotices(filterResult);
       
       // 5. 推送新公告
-      let pushResult: PushResult | undefined;
+      let pushResult: PushResult | PushResult[] | undefined;
       if (dedupeResult.newCount > 0) {
         pushResult = await this.pushNotices(dedupeResult.notices);
+        
+        // 标记公告为已发送
+        await this.markNoticesAsSent(dedupeResult.notices);
       } else {
         logger.info('没有新公告需要推送');
       }
@@ -161,30 +175,56 @@ export class CrawlerService {
   }
 
   /**
-   * 去重处理
+   * 去重处理（异步版本）
    */
-  private deduplicateNotices(filterResult: FilterResult): FilterResult {
+  private async deduplicateNotices(filterResult: FilterResult): Promise<FilterResult> {
     logger.info('开始去重处理');
     
-    const dedupeResult = DeduplicationFilter.process(filterResult);
+    const dedupeResult = await DeduplicationFilter.process(filterResult);
     
     logger.info(`去重完成：${dedupeResult.filteredCount} -> ${dedupeResult.newCount} 条新公告`);
     return dedupeResult;
   }
 
   /**
-   * 推送公告
+   * 推送公告（支持多种模式）
    */
-  private async pushNotices(notices: Notice[]): Promise<PushResult> {
-    logger.info(`开始推送 ${notices.length} 条公告`);
+  private async pushNotices(notices: Notice[]): Promise<PushResult | PushResult[]> {
+    logger.info(`开始推送 ${notices.length} 条公告，推送模式: ${this.pushMode}`);
     
     try {
-      const pushResult = await FeishuBot.pushNotices(notices);
-      
-      if (pushResult.success) {
-        logger.info('公告推送成功');
+      let pushResult: PushResult | PushResult[];
+
+      switch (this.pushMode) {
+        case 'single':
+          // 原有的单条消息推送
+          pushResult = await FeishuBot.pushNotices(notices);
+          break;
+          
+        case 'categorized':
+          // 分类后的单条消息推送
+          pushResult = await FeishuBot.pushCategorizedNotices(notices);
+          break;
+          
+        case 'by-category':
+          // 按分类分别推送
+          pushResult = await FeishuBot.pushNoticesByCategory(notices);
+          break;
+          
+        default:
+          throw new Error(`未知的推送模式: ${this.pushMode}`);
+      }
+
+      // 记录推送结果
+      if (Array.isArray(pushResult)) {
+        const successCount = pushResult.filter(r => r.success).length;
+        logger.info(`分类推送完成，成功: ${successCount}/${pushResult.length}`);
       } else {
-        logger.error('公告推送失败:', pushResult.message);
+        if (pushResult.success) {
+          logger.info('公告推送成功');
+        } else {
+          logger.error('公告推送失败:', pushResult.message);
+        }
       }
       
       return pushResult;
@@ -196,6 +236,19 @@ export class CrawlerService {
         message: `推送失败: ${error.message}`,
         timestamp: new Date().toISOString(),
       };
+    }
+  }
+
+  /**
+   * 标记公告为已发送
+   */
+  private async markNoticesAsSent(notices: Notice[]): Promise<void> {
+    try {
+      const noticeIds = notices.map(notice => notice.id);
+      await DeduplicationFilter.markBatchAsSent(noticeIds);
+      logger.info(`标记 ${noticeIds.length} 条公告为已发送`);
+    } catch (error: any) {
+      logger.error('标记公告为已发送失败:', error);
     }
   }
 
@@ -324,7 +377,7 @@ export class CrawlerService {
    * 推送系统状态
    */
   async pushSystemStatus(): Promise<PushResult> {
-    const cacheStats = DeduplicationFilter.getStats();
+    const cacheStats = await DeduplicationFilter.getStats();
     
     const status = {
       totalProcessed: this.totalProcessed,
