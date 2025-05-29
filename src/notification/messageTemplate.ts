@@ -7,8 +7,6 @@ export class MessageTemplate {
   private static readonly EMOJI = {
     BUILDING: '🏢',
     BELL: '🔔',
-    NEW: '🆕',
-    CALENDAR: '📅',
     MEMO: '📝',
     CHECK: '✅',
     ERROR: '❌',
@@ -41,13 +39,10 @@ export class MessageTemplate {
    */
   private static formatTime(date?: string): string {
     const targetDate = date ? new Date(date) : new Date();
-    return targetDate.toLocaleString('zh-CN', { 
-      timeZone: 'Asia/Shanghai',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    const year = targetDate.getFullYear().toString().slice(-2);
+    const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
+    const day = targetDate.getDate().toString().padStart(2, '0');
+    return `${year}${month}${day}`;
   }
 
   /**
@@ -71,10 +66,8 @@ export class MessageTemplate {
    * 创建简洁的通知标题
    */
   private static createNoticeTitle(notice: Notice, index?: number): string {
-    const isNew = this.isToday(notice.publishDate);
-    const prefix = isNew ? `${this.EMOJI.NEW} ` : '';
     const indexStr = typeof index === 'number' ? `${index + 1}. ` : '';
-    return `${prefix}${indexStr}${notice.title}`;
+    return `${indexStr}${notice.title}`;
   }
 
   /**
@@ -82,12 +75,11 @@ export class MessageTemplate {
    */
   private static createNoticeMeta(notice: Notice): string {
     const publishTime = this.formatTime(notice.publishDate);
-    const isNew = this.isToday(notice.publishDate);
-    const timeTag = isNew ? '今日发布' : publishTime;
+    const timeTag = publishTime;
     
-    let meta = `${this.EMOJI.CALENDAR} ${timeTag}`;
+    let meta = `${timeTag}`;
     if (notice.category) {
-      meta += ` • ${notice.category}`;
+      meta += `${notice.category}`;
     }
     return meta;
   }
@@ -142,9 +134,6 @@ export class MessageTemplate {
     // 标题
     elements.push(this.createCardElement(`**${notice.title}**`));
 
-    // 元信息
-    elements.push(this.createCardElement(this.createNoticeMeta(notice)));
-
     // 摘要（如果有）
     if (notice.summary) {
       elements.push(this.createCardElement(`> ${notice.summary}`));
@@ -161,24 +150,15 @@ export class MessageTemplate {
    */
   private static createNoticeList(notices: Notice[]): any[] {
     const elements = [];
-    
-    // 统计信息
-    const newCount = notices.filter(n => this.isToday(n.publishDate)).length;
-    let statsText = `${this.EMOJI.CHART} 共 ${notices.length} 条通知`;
-    if (newCount > 0) {
-      statsText += `，${newCount} 条今日发布`;
-    }
-    
-    elements.push(this.createCardElement(statsText));
+
     elements.push(this.createDivider());
 
     // 通知列表
     notices.forEach((notice, index) => {
       // 标题和时间拼接在一起
       const publishTime = this.formatTime(notice.publishDate);
-      const isNew = this.isToday(notice.publishDate);
-      const timeTag = isNew ? '今日发布' : publishTime;
-      const titleWithTime = `**${this.createNoticeTitle(notice, index)}** ${this.EMOJI.CALENDAR} ${timeTag}`;
+      const timeTag = publishTime;
+      const titleWithTime = `${timeTag}-${this.createNoticeTitle(notice, index)}`;
       
       elements.push(this.createCardElement(titleWithTime));
       
@@ -214,14 +194,6 @@ export class MessageTemplate {
       template
     };
   }
-
-  /**
-   * 创建时间戳元素
-   */
-  private static createTimestamp(): any {
-    return this.createCardElement(`${this.EMOJI.TIME} ${this.formatTime()}`);
-  }
-
   /**
    * 创建交互式卡片消息（主要接口）
    */
@@ -239,7 +211,7 @@ export class MessageTemplate {
     const header = this.createCardHeader(title);
 
     // 创建卡片内容
-    const elements = [this.createTimestamp(), this.createDivider()];
+    const elements: any[] = [];
 
     if (notices.length === 1) {
       // 单条通知 - 详细展示
@@ -273,28 +245,13 @@ export class MessageTemplate {
       allNotices.push(...notices);
     });
 
-    const newCount = allNotices.filter(n => this.isToday(n.publishDate)).length;
 
     // 创建卡片头部
     const title = `${this.EMOJI.BUILDING} 深圳住建局通知公告 (${categories.length}个分类)`;
     const header = this.createCardHeader(title);
 
     // 创建卡片内容
-    const elements = [this.createTimestamp(), this.createDivider()];
-
-    // 总体统计
-    let statsText = `${this.EMOJI.CHART} 共 ${allNotices.length} 条通知，${categories.length} 个分类`;
-    if (newCount > 0) {
-      statsText += `，${newCount} 条今日发布`;
-    }
-    elements.push(this.createCardElement(statsText));
-
-    // 分类统计
-    const categoryStats = categories.map(cat => 
-      `• **${cat}**: ${categorized[cat].length} 条`
-    ).join('\n');
-    elements.push(this.createCardElement(categoryStats));
-    elements.push(this.createDivider());
+    const elements: any[] = [];
 
     // 按分类展示通知（只显示标题）
     categories.forEach((category, catIndex) => {
@@ -306,9 +263,8 @@ export class MessageTemplate {
       notices.forEach((notice, index) => {
         const title = this.createNoticeTitle(notice);
         const publishTime = this.formatTime(notice.publishDate);
-        const isNew = this.isToday(notice.publishDate);
-        const timeTag = isNew ? '今日发布' : publishTime;
-        elements.push(this.createCardElement(`• **${title}** ${this.EMOJI.CALENDAR} ${timeTag}`));
+        const timeTag = publishTime;
+        elements.push(this.createCardElement(`${timeTag}-${title}`));
         elements.push(this.createActionButton(notice, '→'));
       });
 
@@ -343,7 +299,7 @@ export class MessageTemplate {
     const header = this.createCardHeader(title, color);
 
     // 创建卡片内容
-    const elements = [this.createTimestamp(), this.createDivider()];
+    const elements = [this.createDivider()];
 
     if (notices.length === 1) {
       elements.push(...this.createSingleNoticeCard(notices[0]));
@@ -393,9 +349,7 @@ export class MessageTemplate {
     content += `${this.EMOJI.TIME} ${this.formatTime()}\n\n`;
     
     notices.forEach((notice, index) => {
-      const isNew = this.isToday(notice.publishDate);
-      const prefix = isNew ? `${this.EMOJI.NEW} ` : '';
-      content += `${prefix}${index + 1}. ${notice.title}\n`;
+      content += `${index + 1}. ${notice.title}\n`;
       content += `${this.createNoticeMeta(notice)}\n`;
       if (notice.summary) {
         content += `${this.EMOJI.MEMO} ${notice.summary}\n`;
@@ -420,7 +374,6 @@ export class MessageTemplate {
       card: {
         header: this.createCardHeader(`${this.EMOJI.BUILDING} 深圳住建局通知公告`, this.COLORS.NEUTRAL),
         elements: [
-          this.createTimestamp(),
           this.createDivider(),
           this.createCardElement(`${this.EMOJI.CHECK} 暂无新的通知公告`)
         ]
@@ -437,7 +390,6 @@ export class MessageTemplate {
       card: {
         header: this.createCardHeader(`${this.EMOJI.ERROR} 系统异常通知`, this.COLORS.ERROR),
         elements: [
-          this.createTimestamp(),
           this.createDivider(),
           this.createCardElement(`${this.EMOJI.WARNING} **错误信息**\n${error}`),
           ...(details ? [this.createCardElement(`${this.EMOJI.INFO} **详细信息**\n\`\`\`\n${JSON.stringify(details, null, 2)}\n\`\`\``)] : [])
@@ -464,9 +416,8 @@ export class MessageTemplate {
       card: {
         header: this.createCardHeader(`${this.EMOJI.CHART} 系统运行状态`, this.COLORS.SUCCESS),
         elements: [
-          this.createTimestamp(),
           this.createDivider(),
-          this.createCardElement(`${this.EMOJI.CHART} **处理统计**\n• 总处理: ${status.totalProcessed} 条\n• 新增: ${status.newNotices} 条\n• 过滤: ${status.filteredOut} 条\n• 成功率: ${successRate}%`),
+          this.createCardElement(`${this.EMOJI.CHART} **处理统计**\n总处理: ${status.totalProcessed} 条\n新增: ${status.newNotices} 条\n过滤: ${status.filteredOut} 条\n成功率: ${successRate}%`),
           this.createCardElement(`${this.EMOJI.CHECK} 系统运行正常，上次更新: ${status.lastUpdate}`)
         ]
       }
