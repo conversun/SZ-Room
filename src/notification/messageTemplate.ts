@@ -24,68 +24,19 @@ export class MessageTemplate {
     NEUTRAL: 'grey'
   } as const;
 
-  // 简化的分类颜色映射
-  private static readonly CATEGORY_COLORS = {
-    '人才住房配售': 'blue',
-    '安居型商品房': 'green',
-    '保障性租赁住房': 'turquoise',
-    '政策法规': 'purple',
-    '招标采购': 'orange',
-    '其他': 'grey'
-  } as const;
-
   /**
-   * 格式化时间
+   * 格式化日期为 YYYY-MM-DD 格式
    */
-  private static formatTime(date?: string): string {
+  private static formatDate(date?: string): string {
     const targetDate = date ? new Date(date) : new Date();
-    const year = targetDate.getFullYear().toString().slice(-2);
+    const year = targetDate.getFullYear();
     const month = (targetDate.getMonth() + 1).toString().padStart(2, '0');
     const day = targetDate.getDate().toString().padStart(2, '0');
-    return `${year}${month}${day}`;
+    return `${year}-${month}-${day}`;
   }
 
   /**
-   * 检查是否为今日发布
-   */
-  private static isToday(publishDate: string): boolean {
-    const today = new Date().toDateString();
-    const noticeDate = new Date(publishDate).toDateString();
-    return today === noticeDate;
-  }
-
-  /**
-   * 获取分类颜色
-   */
-  private static getCategoryColor(category?: string): string {
-    if (!category) return this.COLORS.NEUTRAL;
-    return this.CATEGORY_COLORS[category as keyof typeof this.CATEGORY_COLORS] || this.COLORS.NEUTRAL;
-  }
-
-  /**
-   * 创建简洁的通知标题
-   */
-  private static createNoticeTitle(notice: Notice, index?: number): string {
-    const indexStr = typeof index === 'number' ? `${index + 1}. ` : '';
-    return `${indexStr}${notice.title}`;
-  }
-
-  /**
-   * 创建通知元信息
-   */
-  private static createNoticeMeta(notice: Notice): string {
-    const publishTime = this.formatTime(notice.publishDate);
-    const timeTag = publishTime;
-    
-    let meta = `${timeTag}`;
-    if (notice.category) {
-      meta += `${notice.category}`;
-    }
-    return meta;
-  }
-
-  /**
-   * 创建基础卡片元素
+   * 创建卡片元素
    */
   private static createCardElement(content: string, isMarkdown = true): any {
     return {
@@ -107,7 +58,7 @@ export class MessageTemplate {
   /**
    * 创建操作按钮
    */
-  private static createActionButton(notice: Notice, buttonText = '>'): any {
+  private static createActionButton(notice: Notice): any {
     return {
       tag: 'action',
       actions: [
@@ -115,7 +66,7 @@ export class MessageTemplate {
           tag: 'button',
           text: {
             tag: 'plain_text',
-            content: buttonText
+            content: '详情'
           },
           type: 'default',
           size: 'tiny',
@@ -123,63 +74,6 @@ export class MessageTemplate {
         }
       ]
     };
-  }
-
-  /**
-   * 创建单个通知的卡片内容
-   */
-  private static createSingleNoticeCard(notice: Notice): any[] {
-    const elements = [];
-
-    // 标题
-    elements.push(this.createCardElement(`**${notice.title}**`));
-
-    // 摘要（如果有）
-    if (notice.summary) {
-      elements.push(this.createCardElement(`> ${notice.summary}`));
-    }
-
-    // 操作按钮
-    elements.push(this.createActionButton(notice));
-
-    return elements;
-  }
-
-  /**
-   * 创建多个通知的列表
-   */
-  private static createNoticeList(notices: Notice[]): any[] {
-    const elements = [];
-
-    elements.push(this.createDivider());
-
-    // 通知列表
-    notices.forEach((notice, index) => {
-      // 标题和时间拼接在一起
-      const publishTime = this.formatTime(notice.publishDate);
-      const timeTag = publishTime;
-      const titleWithTime = `${timeTag}-${this.createNoticeTitle(notice, index)}`;
-      
-      elements.push(this.createCardElement(titleWithTime));
-      
-      // 摘要（简化显示）
-      if (notice.summary) {
-        const summary = notice.summary.length > 50 
-          ? notice.summary.substring(0, 50) + '...' 
-          : notice.summary;
-        elements.push(this.createCardElement(`${this.EMOJI.MEMO} ${summary}`));
-      }
-
-      // 查看链接
-      elements.push(this.createActionButton(notice));
-
-      // 分隔线（非最后一条）
-      if (index < notices.length - 1) {
-        elements.push(this.createDivider());
-      }
-    });
-
-    return elements;
   }
 
   /**
@@ -194,32 +88,57 @@ export class MessageTemplate {
       template
     };
   }
+
   /**
-   * 创建交互式卡片消息（主要接口）
+   * 格式化单个通知内容
+   * 格式：{分类名} {日期} {文章标题}
    */
-  static createInteractiveCard(notices: Notice[]): any {
-    if (notices.length === 0) {
-      return this.createEmptyCard();
+  private static formatNoticeContent(notice: Notice): string {
+    const category = notice.category || '未分类';
+    const date = this.formatDate(notice.publishDate);
+    const title = this.cleanNoticeTitle(notice.title);
+    
+    return `**${category}** ${date} ${title}`;
+  }
+
+  /**
+   * 清理公告标题，移除冗余前缀
+   */
+  private static cleanNoticeTitle(title: string): string {
+    const prefixesToRemove = [
+      '深圳市住房保障署关于',
+      '深圳市住房和建设局关于'
+    ];
+
+    let cleanedTitle = title;
+    
+    // 依次检查并移除前缀
+    for (const prefix of prefixesToRemove) {
+      if (cleanedTitle.startsWith(prefix)) {
+        cleanedTitle = cleanedTitle.substring(prefix.length);
+        break; // 找到匹配的前缀后就停止
+      }
     }
 
-    // 确定标题和模板
-    const title = notices.length === 1 
-      ? `${this.EMOJI.BELL} ${notices[0].title}`
-      : `${this.EMOJI.BUILDING} 深圳住建局通知公告`;
+    return cleanedTitle.trim();
+  }
 
-    // 创建卡片头部
-    const header = this.createCardHeader(title);
+  /**
+   * 创建单条通知消息
+   */
+  static createSingleNoticeMessage(notice: Notice): any {
+    const title = `${this.EMOJI.BELL} 深圳住建局新通知`;
+    const header = this.createCardHeader(title, this.COLORS.PRIMARY);
 
-    // 创建卡片内容
-    const elements: any[] = [];
-
-    if (notices.length === 1) {
-      // 单条通知 - 详细展示
-      elements.push(...this.createSingleNoticeCard(notices[0]));
-    } else {
-      // 多条通知 - 列表展示
-      elements.push(...this.createNoticeList(notices));
-    }
+    const elements = [
+      this.createDivider(),
+      // 通知标题信息
+      this.createCardElement(this.formatNoticeContent(notice)),
+      // 详情
+      this.createCardElement(`${this.EMOJI.MEMO} ${notice.summary || '暂无详情'}`),
+      // 操作按钮
+      this.createActionButton(notice)
+    ];
 
     return {
       msg_type: 'interactive',
@@ -231,45 +150,32 @@ export class MessageTemplate {
   }
 
   /**
-   * 创建分类消息
+   * 创建多条通知消息
    */
-  static createCategorizedInteractiveCard(categorized: CategorizedNotices): any {
-    const categories = Object.keys(categorized);
-    if (categories.length === 0) {
-      return this.createEmptyCard();
-    }
+  static createMultipleNoticesMessage(notices: Notice[]): any {
+    const title = `${this.EMOJI.BUILDING} 深圳住建局通知公告 (${notices.length}条)`;
+    const header = this.createCardHeader(title, this.COLORS.PRIMARY);
 
-    // 统计所有通知
-    const allNotices: Notice[] = [];
-    Object.values(categorized).forEach(notices => {
-      allNotices.push(...notices);
-    });
+    const elements = [this.createDivider()];
 
-
-    // 创建卡片头部
-    const title = `${this.EMOJI.BUILDING} 深圳住建局通知公告 (${categories.length}个分类)`;
-    const header = this.createCardHeader(title);
-
-    // 创建卡片内容
-    const elements: any[] = [];
-
-    // 按分类展示通知（只显示标题）
-    categories.forEach((category, catIndex) => {
-      const notices = categorized[category];
-      const color = this.getCategoryColor(category);
+    // 按原始顺序展示通知
+    notices.forEach((notice, index) => {
+      // 通知标题信息
+      elements.push(this.createCardElement(`${index + 1}. ${this.formatNoticeContent(notice)}`));
       
-      elements.push(this.createCardElement(`<text_tag color="${color}">${category}</text_tag>`));
-      
-      notices.forEach((notice, index) => {
-        const title = this.createNoticeTitle(notice);
-        const publishTime = this.formatTime(notice.publishDate);
-        const timeTag = publishTime;
-        elements.push(this.createCardElement(`${timeTag}-${title}`));
-        elements.push(this.createActionButton(notice, '→'));
-      });
+      // 详情（简化显示）
+      if (notice.summary) {
+        const summary = notice.summary.length > 80 
+          ? notice.summary.substring(0, 80) + '...' 
+          : notice.summary;
+        elements.push(this.createCardElement(`${this.EMOJI.MEMO} ${summary}`));
+      }
 
-      // 分类间分隔线
-      if (catIndex < categories.length - 1) {
+      // 操作按钮
+      elements.push(this.createActionButton(notice));
+
+      // 分隔线（非最后一条）
+      if (index < notices.length - 1) {
         elements.push(this.createDivider());
       }
     });
@@ -284,91 +190,24 @@ export class MessageTemplate {
   }
 
   /**
-   * 创建单个分类消息
+   * 创建主要消息接口 - 自动判断单条还是多条
    */
-  static createSingleCategoryMessage(category: string, notices: Notice[]): any {
+  static createNotificationMessage(notices: Notice[]): any {
     if (notices.length === 0) {
-      return null;
+      return this.createEmptyMessage();
     }
-
-    const newCount = notices.filter(n => this.isToday(n.publishDate)).length;
-    const title = `${this.EMOJI.BELL} ${category} (${notices.length}条${newCount > 0 ? `，${newCount}条新` : ''})`;
-    
-    // 创建卡片头部
-    const color = this.getCategoryColor(category);
-    const header = this.createCardHeader(title, color);
-
-    // 创建卡片内容
-    const elements = [this.createDivider()];
 
     if (notices.length === 1) {
-      elements.push(...this.createSingleNoticeCard(notices[0]));
+      return this.createSingleNoticeMessage(notices[0]);
     } else {
-      elements.push(...this.createNoticeList(notices));
-    }
-
-    return {
-      msg_type: 'interactive',
-      card: {
-        header,
-        elements
-      }
-    };
-  }
-
-  /**
-   * 缩短URL显示
-   */
-  private static shortenUrl(url: string): string {
-    try {
-      const urlObj = new URL(url);
-      // 只显示域名部分，去掉协议和路径
-      return urlObj.hostname;
-    } catch {
-      // 如果URL解析失败，返回原始链接的前30个字符
-      return url.length > 30 ? url.substring(0, 30) + '...' : url;
+      return this.createMultipleNoticesMessage(notices);
     }
   }
 
   /**
-   * 创建富文本消息（简化版）
+   * 创建空消息
    */
-  static createRichTextMessage(notices: Notice[]): any {
-    if (notices.length === 0) {
-      return {
-        msg_type: 'text',
-        content: {
-          text: `${this.EMOJI.CHECK} 暂无新的通知公告`
-        }
-      };
-    }
-
-    const newCount = notices.filter(n => this.isToday(n.publishDate)).length;
-    let content = `${this.EMOJI.BUILDING} 深圳住建局通知公告\n`;
-    content += `${this.EMOJI.CHART} 共 ${notices.length} 条${newCount > 0 ? `，${newCount} 条今日发布` : ''}\n`;
-    content += `${this.EMOJI.TIME} ${this.formatTime()}\n\n`;
-    
-    notices.forEach((notice, index) => {
-      content += `${index + 1}. ${notice.title}\n`;
-      content += `${this.createNoticeMeta(notice)}\n`;
-      if (notice.summary) {
-        content += `${this.EMOJI.MEMO} ${notice.summary}\n`;
-      }
-      content += `链接: ${this.shortenUrl(notice.url)}\n\n`;
-    });
-
-    return {
-      msg_type: 'text',
-      content: {
-        text: content.trim()
-      }
-    };
-  }
-
-  /**
-   * 创建空内容卡片
-   */
-  private static createEmptyCard(): any {
+  private static createEmptyMessage(): any {
     return {
       msg_type: 'interactive',
       card: {
@@ -425,20 +264,31 @@ export class MessageTemplate {
   }
 
   /**
-   * Webhook 消息格式（使用交互式卡片）
+   * Webhook 消息格式
    */
   static createWebhookMessage(notices: Notice[]): any {
-    return this.createInteractiveCard(notices);
+    return this.createNotificationMessage(notices);
   }
 
-  /**
-   * 分类富文本消息
-   */
-  static createCategorizedRichTextMessage(categorized: CategorizedNotices): any {
+  // 保持向后兼容的接口
+  static createInteractiveCard(notices: Notice[]): any {
+    return this.createNotificationMessage(notices);
+  }
+
+  static createCategorizedInteractiveCard(categorized: CategorizedNotices): any {
+    // 收集所有公告并按原始索引排序以保持原始顺序
     const allNotices: Notice[] = [];
     Object.values(categorized).forEach(notices => {
       allNotices.push(...notices);
     });
-    return this.createRichTextMessage(allNotices);
+    
+    // 按原始索引排序以恢复原始顺序
+    allNotices.sort((a, b) => {
+      const indexA = (a as any).originalIndex || 0;
+      const indexB = (b as any).originalIndex || 0;
+      return indexA - indexB;
+    });
+    
+    return this.createNotificationMessage(allNotices);
   }
 }

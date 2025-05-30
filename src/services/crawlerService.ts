@@ -117,7 +117,7 @@ export class CrawlerService {
     
     try {
       // 抓取前3页数据（可配置）
-      const pages = await this.scraper.fetchMultiplePages(3);
+      const pages = await this.scraper.fetchMultiplePages(1);
       
       if (pages.length === 0) {
         throw new Error('未能抓取到任何页面数据');
@@ -166,9 +166,6 @@ export class CrawlerService {
     logger.info('开始过滤公告数据');
     
     const filterResult = DataFilter.filter(notices);
-    
-    // 按相关性排序
-    filterResult.notices = DataFilter.sortByRelevance(filterResult.notices);
     
     logger.info(`过滤完成：${filterResult.totalCount} -> ${filterResult.filteredCount} 条`);
     return filterResult;

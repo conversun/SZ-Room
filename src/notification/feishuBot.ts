@@ -361,7 +361,7 @@ export class FeishuBot {
         logger.info(`推送分类 "${category}" 的 ${categoryNotices.length} 条公告`);
         
         try {
-          const message = MessageTemplate.createSingleCategoryMessage(category, categoryNotices);
+          const message = MessageTemplate.createNotificationMessage(categoryNotices);
           if (!message) continue;
 
           let result: PushResult;

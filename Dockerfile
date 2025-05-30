@@ -17,10 +17,6 @@ COPY package*.json ./
 # 安装依赖
 RUN npm ci --only=production && npm cache clean --force
 
-# 创建非 root 用户
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodeuser -u 1001
-
 # 复制源代码
 COPY . .
 
@@ -28,10 +24,7 @@ COPY . .
 RUN npm run build
 
 # 创建日志目录
-RUN mkdir -p logs && chown -R nodeuser:nodejs logs
-
-# 切换到非 root 用户
-USER nodeuser
+RUN mkdir -p logs
 
 # 暴露端口（如果需要）
 # EXPOSE 3000

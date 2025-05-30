@@ -15,9 +15,12 @@ export class CategoryService {
     const categorized: CategorizedNotices = {};
     const rules = config.filter.categoryRules.sort((a, b) => a.priority - b.priority);
 
-    notices.forEach(notice => {
+    notices.forEach((notice, index) => {
       const category = this.getNoticeCategory(notice, rules);
       notice.category = category;
+      
+      // 添加原始索引以保持顺序
+      (notice as any).originalIndex = index;
 
       if (!categorized[category]) {
         categorized[category] = [];
