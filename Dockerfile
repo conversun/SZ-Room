@@ -14,8 +14,8 @@ RUN apk add --no-cache dumb-init
 # 复制 package 文件
 COPY package*.json ./
 
-# 安装所有依赖（包括 devDependencies 用于构建）
-RUN npm ci && npm cache clean --force
+# 安装依赖（包括 devDependencies）
+RUN npm ci
 
 # 复制源代码
 COPY . .
@@ -23,8 +23,8 @@ COPY . .
 # 构建应用
 RUN npm run build
 
-# 重新安装只包含生产依赖，减小镜像大小
-RUN npm ci --only=production && npm cache clean --force
+# 删除 devDependencies 减小镜像大小
+RUN npm prune --production
 
 # 创建日志目录
 RUN mkdir -p logs

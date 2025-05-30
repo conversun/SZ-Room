@@ -4,7 +4,7 @@
   "description": "深圳住建局通知公告抓取与飞书推送系统",
   "main": "dist/app.js",
   "scripts": {
-    "build": "tsc && npm run copy-json",
+    "build": "npx tsc && npm run copy-json",
     "copy-json": "cp src/config/*.json dist/config/ 2>/dev/null || true",
     "start": "node dist/app.js",
     "dev": "ts-node src/app.ts",
